@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Kenny Visuals — Delta Drive</title>
+<style>
+  *{box-sizing:border-box} html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101318;font-family:Arial,sans-serif}
+  #game{display:block;width:100vw;height:100vh;background:#222}
+  #hud{position:fixed;top:14px;left:14px;right:14px;display:flex;justify-content:space-between;color:#fff;font-weight:700;font-size:18px;text-shadow:0 2px 3px #000;pointer-events:none}
+  #start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);color:#fff;text-align:center}
+  .panel{background:rgba(15,18,24,.94);padding:28px;border-radius:20px;max-width:360px;box-shadow:0 12px 40px #000}
+  h1{margin:0 0 8px;font-size:40px}.panel p{color:#cbd2dc;line-height:1.5}
+  button{border:0;border-radius:12px;padding:14px 24px;font-size:18px;font-weight:700;background:#20d46b;color:#07130c;cursor:pointer}
+  #controls{position:fixed;bottom:18px;left:0;right:0;display:flex;justify-content:center;gap:90px;pointer-events:none}
+  .ctrl{pointer-events:auto;width:78px;height:58px;border-radius:18px;border:1px solid #ffffff44;background:#ffffff22;color:white;font-size:28px;backdrop-filter:blur(5px)}
+  @media(min-width:800px){#controls{display:none}}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud"><span id="score">Score: 0</span><span id="speed">Speed: 0</span></div>
+<div id="controls">
+  <button class="ctrl" id="left">◀</button><button class="ctrl" id="right">▶</button>
+</div>
+<div id="start">
+ <div class="panel">
+  <h1>🚗 KENNY VISUALS</h1>
+  <p><b>DELTA DRIVE</b> — Cruise through a busy Delta State city.</p>
+  <p>Dodge traffic, watch for pedestrians and police checkpoints, and refuel before you run dry.</p><p><b>PC:</b> ← → or A/D<br><b>Phone:</b> Use the buttons.</p>
+  <button id="play">START DRIVE</button>
+ </div>
+</div>
+<script>
+const c=document.getElementById('game'),ctx=c.getContext('2d');
+let W,H,dpr,roadX,roadW,player,traffic,peds,stations,checkpoints,billboards,score,fuel,speed,running,last,spawnTimer,cityScroll,keys={};
+const cityName="DELTA STATE";
+
+function resize(){
+ dpr=Math.min(devicePixelRatio||1,2); W=innerWidth; H=innerHeight;
+ c.width=W*dpr;c.height=H*dpr;c.style.width=W+'px';c.style.height=H+'px';
+ ctx.setTransform(dpr,0,0,dpr,0,0);
+ roadW=Math.min(W*.68,540); roadX=(W-roadW)/2;
+ if(player) player.y=H-130;
+}
+addEventListener('resize',resize); resize();
+
+function reset(){
+ player={x:W/2,y:H-130,w:42,h:72};
+ traffic=[];peds=[];stations=[];checkpoints=[];billboards=[];score=0;fuel=100;
+ speed=5;spawnTimer=0;last=performance.now();running=true;cityScroll=0;
+ document.getElementById('start').style.display='none';
+ requestAnimationFrame(loop);
+}
+function spawnCar(){
+ const laneW=roadW/3,lane=Math.floor(Math.random()*3);
+ traffic.push({x:roadX+laneW*lane+laneW/2,y:-100,w:42,h:72,
+   vy:speed*(.65+Math.random()*.35),color:['#e84b4b','#f5b83d','#4b8ee8','#eee','#39b56b'][Math.floor(Math.random()*5)]});
+}
+function spawnPed(){
+ const side=Math.random()<.5?-1:1;
+ peds.push({x:side<0?roadX-42:roadX+roadW+42,y:-30,side,vy:speed*.72,
+   shirt:['#ffcc55','#58b7ff','#ef6b87','#63d17b'][Math.floor(Math.random()*4)]});
+}
+function spawnStation(){
+ stations.push({x:roadX+(Math.random()<.5?-72:roadW+72),y:-100});
+}
+function spawnCheckpoint(){
+ checkpoints.push({y:-140});
+}
+function rounded(x,y,w,h,r){
+ ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill();
+}
+function drawBikeCar(){
+ ctx.save();ctx.translate(player.x,player.y);
+ // shadow
+ ctx.fillStyle='rgba(0,0,0,.3)';ctx.beginPath();ctx.ellipse(0,5,25,39,0,0,Math.PI*2);ctx.fill();
+ // wheels
+ ctx.fillStyle='#17191c';rounded(-22,-29,10,25,4);rounded(12,-29,10,25,4);
+ rounded(-22,4,10,25,4);rounded(12,4,10,25,4);
+ // blue 2D body
+ ctx.fillStyle='#151c3a';rounded(-19,-35,38,70,10);
+ ctx.fillStyle='#25b7ff';rounded(-15,-30,30,58,9);
+ ctx.fillStyle='#bcefff';rounded(-11,-20,22,17,5);
+ ctx.fillStyle='#0b2e4a';rounded(-10,-17,20,10,4);
+ ctx.fillStyle='#ffe66d';rounded(-12,-31,9,6,2);rounded(3,-31,9,6,2);
+ ctx.fillStyle='#ff3d5a';rounded(-10,24,20,6,3);
+ // K logo
+ ctx.fillStyle='#fff';ctx.font='bold 12px Arial';ctx.textAlign='center';ctx.fillText('K',0,8);
+ ctx.restore();
+}
+function drawTraffic(o){
+ ctx.save();ctx.translate(o.x,o.y);
+ ctx.fillStyle='rgba(0,0,0,.25)';ctx.beginPath();ctx.ellipse(0,4,25,39,0,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle='#15171a';rounded(-22,-32,10,25,4);rounded(12,-32,10,25,4);
+ rounded(-22,7,10,25,4);rounded(12,7,10,25,4);
+ ctx.fillStyle=o.color;rounded(-20,-35,40,70,9);
+ ctx.fillStyle='#9fe6ff';rounded(-14,-21,28,18,5);
+ ctx.fillStyle='#2d4550';rounded(-11,-18,22,10,3);
+ ctx.fillStyle='#fff';rounded(-14,-33,10,5,2);rounded(4,-33,10,5,2);
+ ctx.fillStyle='#ff384e';rounded(-12,27,24,5,2);
+ ctx.restore();
+}
+function drawPed(o){
+ ctx.save();ctx.translate(o.x,o.y);
+ ctx.fillStyle='#222';ctx.beginPath();ctx.arc(0,-12,8,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle=o.shirt;rounded(-9,-4,18,24,6);
+ ctx.strokeStyle='#222';ctx.lineWidth=5;
+ ctx.beginPath();ctx.moveTo(-5,19);ctx.lineTo(-8,34);ctx.moveTo(5,19);ctx.lineTo(8,34);ctx.stroke();
+ ctx.beginPath();ctx.moveTo(-7,1);ctx.lineTo(-16,13);ctx.moveTo(7,1);ctx.lineTo(16,13);ctx.stroke();
+ ctx.restore();
+}
+function drawStation(s){
+ ctx.save();ctx.translate(s.x,s.y);
+ ctx.fillStyle='#ffdf45';rounded(-48,-48,96,96,10);
+ ctx.fillStyle='#d73535';rounded(-44,-43,88,20,5);
+ ctx.fillStyle='#fff';ctx.font='bold 14px Arial';ctx.textAlign='center';ctx.fillText('FUEL',0,-28);
+ ctx.fillStyle='#222';rounded(-28,-8,56,44,5);
+ ctx.fillStyle='#77c9ff';rounded(-18,0,36,15,3);
+ ctx.fillStyle='#fff';ctx.font='bold 10px Arial';ctx.fillText('₦ FUEL',0,29);
+ ctx.restore();
+}
+function drawCheckpoint(cp){
+ const y=cp.y;
+ ctx.fillStyle='#26313a';rounded(roadX-15,y,roadW+30,24,5);
+ ctx.fillStyle='#e53935';rounded(roadX+roadW*.35,y+5,roadW*.3,14,3);
+ ctx.fillStyle='#fff';ctx.font='bold 11px Arial';ctx.textAlign='center';ctx.fillText('POLICE CHECKPOINT',W/2,y+16);
+ ctx.fillStyle='#1b2d45';rounded(roadX-48,y+24,45,35,4);rounded(roadX+roadW+3,y+24,45,35,4);
+ ctx.fillStyle='#e33';ctx.fillRect(roadX-43,y+28,35,6);ctx.fillRect(roadX+8+roadW,y+28,35,6);
+}
+function drawBillboard(b){
+ ctx.save();ctx.translate(b.x,b.y);
+ // posts
+ ctx.fillStyle='#4a4a4a';ctx.fillRect(-5,35,10,55);
+ // sign
+ ctx.fillStyle='#161b25';rounded(-72,-42,144,78,7);
+ ctx.strokeStyle='#f3c84b';ctx.lineWidth=4;ctx.strokeRect(-72,-42,144,78);
+ ctx.fillStyle='#f3c84b';ctx.font='bold 14px Arial';ctx.textAlign='center';
+ ctx.fillText('RUKKY HOTEL',0,-12);
+ ctx.fillText('AND SUITS',0,9);
+ ctx.fillStyle='#fff';ctx.font='bold 9px Arial';
+ ctx.fillText('WELCOME',0,26);
+ ctx.restore();
+}
+function drawCity(){
+ ctx.fillStyle='#6f9952';ctx.fillRect(0,0,W,H);
+ // sidewalks
+ ctx.fillStyle='#b7b0a3';ctx.fillRect(0,0,roadX-7,H);ctx.fillRect(roadX+roadW+7,0,W-roadX-roadW-7,H);
+ // buildings
+ const bOff=(cityScroll*.35)%120;
+ for(let y=-120+bOff;y<H;y+=120){
+   ctx.fillStyle='#c86b45';ctx.fillRect(12,y,Math.max(45,roadX-30),85);
+   ctx.fillStyle='#e3b25d';ctx.fillRect(roadX+roadW+18,y+18,Math.max(45,W-roadX-roadW-35),70);
+   ctx.fillStyle='#78b8d8';
+   for(let x=22;x<roadX-20;x+=28)ctx.fillRect(x,y+18,12,18);
+   for(let x=roadX+roadW+28;x<W-12;x+=28)ctx.fillRect(x,y+34,12,18);
+ }
+ // road
+ ctx.fillStyle='#30353a';ctx.fillRect(roadX,0,roadW,H);
+ ctx.fillStyle='#eee';ctx.fillRect(roadX-7,0,7,H);ctx.fillRect(roadX+roadW,0,7,H);
+ ctx.strokeStyle='#f6f6f6';ctx.lineWidth=4;ctx.setLineDash([38,30]);
+ for(let i=1;i<3;i++){ctx.beginPath();ctx.moveTo(roadX+roadW*i/3,0);ctx.lineTo(roadX+roadW*i/3,H);ctx.stroke()}
+ ctx.setLineDash([]);
+ // city label
+ ctx.fillStyle='rgba(255,255,255,.9)';rounded(W/2-90,70,180,30,15);
+ ctx.fillStyle='#222';ctx.font='bold 14px Arial';ctx.textAlign='center';ctx.fillText('DELTA STATE • CITY',W/2,90);
+}
+function collision(a,b){
+ return Math.abs(a.x-b.x)<(a.w+b.w)*.43 && Math.abs(a.y-b.y)<(a.h+b.h)*.43;
+}
+function buyFuel(){
+ if(fuel<100 && score>=20){score-=20;fuel=100}
+}
+function gameOver(reason){
+ running=false;
+ document.getElementById('start').style.display='flex';
+ document.querySelector('#start .panel').innerHTML=
+ `<h1>💥 ${reason}</h1><p>Score: <b>${Math.floor(score)}</b></p>
+ <p>Fuel left: <b>${Math.max(0,Math.floor(fuel))}%</b></p>
+ <button id="play">DRIVE AGAIN</button>`;
+ document.getElementById('play').onclick=reset;
+}
+function loop(t){
+ if(!running)return;
+ const dt=Math.min((t-last)/16.67,2);last=t;
+ if(keys.left)player.x-=7*dt;if(keys.right)player.x+=7*dt;
+ player.x=Math.max(roadX+25,Math.min(roadX+roadW-25,player.x));
+ speed=Math.min(13,5+score/600);
+ fuel-=0.012*speed*dt;
+ cityScroll+=speed*dt;
+ spawnTimer-=dt;
+ if(spawnTimer<=0){spawnCar();if(Math.random()<.25)spawnPed();spawnTimer=Math.max(24,60-speed*2)}
+ if(Math.random()<.003*dt)spawnStation();
+ if(Math.random()<.0018*dt)spawnCheckpoint();
+ if(Math.random()<.0012*dt)billboards.push({x:Math.random()<.5?roadX-115:roadX+roadW+115,y:-120});
+
+ traffic.forEach(o=>o.y+=o.vy*dt);
+ peds.forEach(o=>o.y+=o.vy*dt);
+ stations.forEach(o=>o.y+=speed*.72*dt);
+ checkpoints.forEach(o=>o.y+=speed*dt);
+ billboards.forEach(o=>o.y+=speed*.72*dt);
+
+ traffic=traffic.filter(o=>{if(o.y>H+100){score+=10;return false}return true});
+ peds=peds.filter(o=>o.y<H+80);
+ stations=stations.filter(o=>o.y<H+120);
+ checkpoints=checkpoints.filter(o=>o.y<H+80);
+ billboards=billboards.filter(o=>o.y<H+130);
+
+ for(const o of traffic)if(collision(player,o))return gameOver('CRASH!');
+ for(const p of peds){
+   if(Math.abs(player.y-p.y)<45 && Math.abs(player.x-p.x)<48)return gameOver('PEDestrian HIT');
+ }
+ for(const s of stations){
+   if(Math.abs(player.x-s.x)<55 && Math.abs(player.y-s.y)<70)buyFuel();
+ }
+ for(const cp of checkpoints){
+   if(Math.abs(player.y-cp.y)<45 && Math.abs(player.x-W/2)<roadW/2){
+     // Slow down briefly for checkpoint.
+     speed=Math.max(4,speed*.94);
+     score+=2;
+   }
+ }
+ if(fuel<=0)return gameOver('OUT OF FUEL');
+ score+=.12*dt;
+
+ document.getElementById('score').textContent='₦ '+Math.floor(score)+'  •  KENNY VISUALS';
+ document.getElementById('speed').textContent='Fuel: '+Math.floor(fuel)+'%  |  '+Math.floor(speed*20)+' km/h';
+ drawCity();billboards.forEach(drawBillboard);stations.forEach(drawStation);checkpoints.forEach(drawCheckpoint);
+ peds.forEach(drawPed);traffic.forEach(drawTraffic);drawBikeCar();
+ requestAnimationFrame(loop);
+}
+addEventListener('keydown',e=>{
+ if(['ArrowLeft','a','A'].includes(e.key))keys.left=true;
+ if(['ArrowRight','d','D'].includes(e.key))keys.right=true;
+});
+addEventListener('keyup',e=>{
+ if(['ArrowLeft','a','A'].includes(e.key))keys.left=false;
+ if(['ArrowRight','d','D'].includes(e.key))keys.right=false;
+ if(['f','F'].includes(e.key))buyFuel();
+});
+function hold(id,key){
+ const b=document.getElementById(id);
+ ['touchstart','mousedown'].forEach(ev=>b.addEventListener(ev,e=>{e.preventDefault();keys[key]=true}));
+ ['touchend','touchcancel','mouseup','mouseleave'].forEach(ev=>b.addEventListener(ev,e=>{e.preventDefault();keys[key]=false}));
+}
+hold('left','left');hold('right','right');
+document.getElementById('play').onclick=reset;
+</script>
+</body>
+</html>
